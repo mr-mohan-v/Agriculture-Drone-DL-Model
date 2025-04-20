@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Crop Monitoring and Disease Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+
+        h1 {
+            background-color: #333;
+            color: #fff;
+            margin-top: -11px;
+            padding: 10px;
+            left:auto;
+            margin-left: -10px;
+            margin-right: -10px;
+
+            
+        }
+
+        #map {
+            height: 500px;
+            width: 70%;
+            float: right;
+            
+            padding: 55px;
+            position: relative;
+        }
+
+        .info-window {
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 10px;
+            font-size: 16px;
+            line-height: 1.4;
+            text-align: left;
+        }
+
+        form {
+            background-color: #55b7c0;
+            outline: none;
+            padding: 10px;
+            margin-left: -10px;
+            margin-right: -10px;
+        }
+
+        label {
+            font-weight: bold;
+        }
+
+        input[type="date"] {
+            width: 200px;
+            padding: 5px;
+        }
+        #dateRangeForm{
+            float: left;
+            position: absolute;
+        }
+        #updateMapButton {
+            background-color: #333;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        #updateMapButton:hover {
+            background-color: #555;
+        }
+
+        #animatePathButton {
+            background-color: #0074cc;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            position: relative;
+            top: 620px;
+            left:  700px;
+            font-size: 16px;
+        }
+
+        #animatePathButton:hover {
+            background-color: #0099ff;
+        }
+
+    </style>
+</head>
+<body>
+    <h1>Crop Monitoring and Disease Detection</h1>
+    <form id="dateRangeForm">
+        <label for="startDate">Start Date:</label>
+        <input type="date" id="startDate" name="startDate"><br><br>
+        <label for="endDate">End  Date: </label>
+        <input type="date" style="margin-left: 5px;;" id="endDate" name="endDate"><br><br>
+        <button type="button" id="updateMapButton">Update Map</button>
+    </form>
+    <div id="map"></div>
+    <button type="button" id="animatePathButton">Animate Path</button>
+
+    <script>
+        var map;
+        var markers = [];
+        var pathCoordinates = [];
+        var pathPolyline;
+        var animationInterval;
+        var animationIndex = 0;
+
+        function convertToIST(utcTimestamp) {
+            var utcDate = new Date(utcTimestamp);
+            var istOffset = 330; // 5 hours 30 minutes
+            var istTimestamp = utcDate.getTime() + (istOffset * 60 * 1000);
+            return new Date(istTimestamp).toLocaleString();
+        }
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                zoom: 12,
+                center: { lat: 0, lng: 0 } // Default center
+            });
+
+            document.getElementById('updateMapButton').addEventListener('click', updateMap);
+            document.getElementById('animatePathButton').addEventListener('click', animatePath);
+        }
+
+        function updateMap() {
+            var channelID = '2178325';
+            var apiKey = 'YSLMP7L826QSFQE2';
+            var startDate = document.getElementById('startDate').value;
+            var endDate = document.getElementById('endDate').value;
+
+            fetch(`https://api.thingspeak.com/channels/${channelID}/feeds.json?api_key=${apiKey}&start=${startDate}&end=${endDate}`)
+                .then(response => response.json())
+                .then(data => {
+                    clearMap();
+                    data.feeds.forEach(feed => {
+                        var latitude = parseFloat(feed.field1);
+                        var longitude = parseFloat(feed.field2);
+                        var timestamp = feed.created_at;
+
+                        // Convert the timestamp to a JavaScript Date object
+                        var timestampDate = new Date(timestamp);
+
+                        timestampDate.setMinutes(timestampDate.getMinutes());
+                        timestampDate.setSeconds(timestampDate.getSeconds());
+
+                        // Format the timestamp according to your local time zone
+                        var Timestamp = timestampDate.toLocaleString();
+
+                        var location = { lat: latitude, lng: longitude };
+                        pathCoordinates.push(location);
+
+                        var marker = new google.maps.Marker({
+                            position: location,
+                            map: map,
+                            title: `Timestamp: ${Timestamp}`,
+                        });
+
+                        markers.push(marker);
+                        var infoWindow = new google.maps.InfoWindow({
+                                content: `<div class="info-window">
+                                    <strong>Location Details</strong><br>
+                                    <div><strong>Latitude:</strong> ${latitude}</div>
+                                    <div><strong>Longitude:</strong> ${longitude}</div>
+                                    <div><strong>Timestamp:</strong> ${Timestamp}</div>
+                                    <img src='/static/1.jpg'/>
+                                </div>`
+                            });
+                        marker.addListener('click', function() {
+                            infoWindow.open(map, marker);
+                        });
+
+                        // Set the map center to the latest location
+                        map.setCenter(location);
+                    });
+
+                    // Create a polyline to display the path
+                    pathPolyline = new google.maps.Polyline({
+                        path: pathCoordinates,
+                        geodesic: true,
+                        strokeColor: '#FF0000',
+                        strokeOpacity: 1.0,
+                        strokeWeight: 2
+                    });
+                    pathPolyline.setMap(map);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+
+        function clearMap() {
+            markers.forEach(marker => {
+                marker.setMap(null);
+            });
+            markers = [];
+            if (pathPolyline) {
+                pathPolyline.setMap(null);
+            }
+            pathCoordinates = [];
+            clearInterval(animationInterval);
+        }
+
+        function animatePath() {
+            
+
+            if (pathCoordinates.length > 0) {
+                animationIndex = 0;
+                animationInterval = setInterval(function() {
+                    if (animationIndex < pathCoordinates.length) {
+                        var subPath = pathCoordinates.slice(0, animationIndex + 1);
+                        if (pathPolyline) {
+                            pathPolyline.setMap(null);
+                        }
+                        pathPolyline = new google.maps.Polyline({
+                            path: subPath,
+                            geodesic: true,
+                            strokeColor: '#FF0000',
+                            strokeOpacity: 1.0,
+                            strokeWeight: 2
+                        });
+                        pathPolyline.setMap(map);
+                        animationIndex++;
+                    } else {
+                        clearInterval(animationInterval);
+                    }
+                }, 2000); // 2 second per segment, adjust as needed
+            }
+        }
+    </script>
+    <script async defer
+        src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAsTbhYpI10_jiaT0ogaIMz9EHulYWrxs0&callback=initMap">
+    </script>
+</body>
+</html>
